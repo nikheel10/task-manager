@@ -1,0 +1,628 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  MD
+  MANAGER
+  TEAM_MEMBER
+  VIEWER
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  INACTIVE
+}
+
+enum VerificationStatus {
+  NONE
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  CLOSED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskType {
+  TASK
+  BUG
+  FEATURE
+  MAINTENANCE
+  COMPLIANCE
+}
+
+enum VerificationOutcome {
+  VERIFIED
+  REJECTED
+}
+
+enum AlertType {
+  REGULATORY
+  STATUTORY
+  LICENSE_RENEWAL
+  CONTRACT_RENEWAL
+  INSURANCE
+  INSPECTION
+  COMPLIANCE_FILING
+}
+
+enum AlertStatus {
+  OPEN
+  IN_PROGRESS
+  SUBMITTED
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+enum Recurrence {
+  ONE_TIME
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+  CUSTOM
+}
+
+enum EntityType {
+  PROJECT
+  ASSET
+  COMPANY
+  SITE
+  OTHER
+}
+
+model Department {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  code          String   @unique
+  active        Boolean  @default(true)
+  hasGlobalAccess Boolean @default(false)
+  createdAt     DateTime @default(now())
+  createdById   String?
+
+  createdBy     User?   @relation("DepartmentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  users         User[]  @relation("UserDepartment")
+  tasks         Task[]  @relation("TaskDepartment")
+  originTasks   Task[]  @relation("OriginTaskDepartment")
+  alerts        Alert[] @relation("AlertDepartment")
+  projects      Project[] @relation("ProjectDepartment")
+
+  @@index([code])
+  @@index([active])
+  @@index([hasGlobalAccess])
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  employeeId    String?   @unique
+  passwordHash  String
+  role          Role      @default(TEAM_MEMBER)
+  status        UserStatus @default(ACTIVE)
+  isActive      Boolean   @default(true)
+  isComplianceOwner Boolean @default(false)
+  departmentId  String?
+  approvedById  String?
+  approvedAt    DateTime?
+  rejectionReason String?
+  requestedAt   DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  department    Department? @relation("UserDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+  approvedBy    User?     @relation("UserApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedUsers User[]    @relation("UserApprover")
+
+   assignedTasks     Task[]             @relation("TaskAssignee")
+  createdTasks      Task[]             @relation("TaskCreator")
+  verifiedTasks     Task[]             @relation("TaskVerifier")
+  comments          TaskComment[]
+  checklistItems    TaskChecklist[]    @relation("ChecklistUser")
+  verifications     TaskVerification[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  uploadedAttachments TaskAttachment[] @relation("TaskAttachmentUploader")
+  taskAssignments   TaskAssignment[]   @relation("TaskAssignmentUser")
+  toTaskAssignments TaskAssignment[]   @relation("TaskAssignmentAssigner")
+  assignedByTaskAssignments TaskAssignment[] @relation("TaskAssignmentBy")
+  createdDepartments Department[] @relation("DepartmentCreator")
+  escalatedAlerts   Alert[]          @relation("AlertEscalationTarget")
+
+  ownedAlerts       Alert[]            @relation("AlertOwner")
+  createdAlerts     Alert[]            @relation("AlertCreator")
+  alertComments     AlertComment[]
+  alertEvidences    AlertEvidence[]    @relation("AlertEvidenceUploader")
+  escalations       AlertEscalationRule[] @relation("EscalationTarget")
+
+  @@index([email])
+  @@index([role])
+  @@index([isActive])
+  @@index([status])
+  @@index([departmentId])
+  @@index([employeeId])
+}
+
+model Project {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean     @default(true)
+  departmentId String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  department   Department?  @relation("ProjectDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+  tasks       Task[]
+  milestones  Milestone[]
+
+  @@index([name])
+  @@index([isActive])
+  @@index([departmentId])
+}
+
+model Milestone {
+  id          String      @id @default(cuid())
+  name        String
+  phaseName   String?
+  dueDate     DateTime?
+  projectId   String
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks       Task[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([projectId])
+  @@index([dueDate])
+}
+
+model TaskCategory {
+  id        String   @id @default(cuid())
+  name      String
+  code      String?
+  departmentId String?
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  tasks     Task[]
+  checklists TaskCategoryChecklist[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active])
+  @@index([sortOrder])
+  @@index([departmentId])
+}
+
+model TaskCategoryChecklist {
+  id        String   @id @default(cuid())
+  categoryId String
+  category  TaskCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  label     String
+  mandatory Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([sortOrder])
+}
+
+model Task {
+  id              String       @id @default(cuid())
+  taskNumber      Int          @unique @default(autoincrement())
+  title           String
+  description     String?
+  status          TaskStatus   @default(NOT_STARTED)
+  verificationStatus VerificationStatus @default(NONE)
+  priority        TaskPriority
+  type            TaskType?    @default(TASK)
+  categoryId      String?
+  estimatedHours  Float?
+  actualHours     Float?       @default(0)
+  percentComplete Int          @default(0)
+  dueDate         DateTime
+  blockedReason   String?
+  blockedAt       DateTime?
+  deletedAt       DateTime?
+  verifiedById    String?
+  verifiedAt      DateTime?
+  rejectionReason String?
+
+  projectId       String?
+  milestoneId     String?
+  assigneeId      String
+  creatorId       String
+  departmentId    String?
+  originDepartmentId String?
+  parentTaskId    String?
+  isCrossDepartment Boolean   @default(false)
+
+  project         Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  milestone       Milestone?   @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+  category        TaskCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  assignee        User         @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  creator         User         @relation("TaskCreator", fields: [creatorId], references: [id])
+  verifier        User?        @relation("TaskVerifier", fields: [verifiedById], references: [id])
+  department      Department?  @relation("TaskDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+  originDepartment Department? @relation("OriginTaskDepartment", fields: [originDepartmentId], references: [id], onDelete: SetNull)
+  parentTask      Task?        @relation("TaskParent", fields: [parentTaskId], references: [id], onDelete: SetNull)
+  subTasks        Task[]       @relation("TaskParent")
+
+   comments        TaskComment[]
+  checklist       TaskChecklist[]
+  verifications   TaskVerification[]
+  auditLogs       AuditLog[]
+  attachments     TaskAttachment[]
+  taskAssignments TaskAssignment[]
+  notifications   Notification[]
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([taskNumber])
+  @@index([assigneeId])
+  @@index([projectId])
+  @@index([milestoneId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([priority])
+  @@index([dueDate])
+  @@index([deletedAt])
+  @@index([creatorId])
+  @@index([departmentId])
+  @@index([originDepartmentId])
+  @@index([parentTaskId])
+  @@index([verificationStatus])
+}
+
+model TaskChecklist {
+  id           String   @id @default(cuid())
+  title        String
+  completed    Boolean  @default(false)
+  doneAt       DateTime?
+  order        Int      @default(0)
+  isMandatory  Boolean  @default(false)
+
+  taskId       String
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  userId       String?
+  user         User?    @relation("ChecklistUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([taskId])
+  @@index([userId])
+}
+
+model TaskComment {
+  id        String   @id @default(cuid())
+  content   String
+  edited    Boolean  @default(false)
+  editedAt  DateTime?
+  deletedAt DateTime?
+
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([taskId])
+  @@index([authorId])
+  @@index([deletedAt])
+}
+
+model TaskAssignment {
+  id           String     @id @default(cuid())
+  taskId       String
+  task         Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fromUserId   String?
+  fromUser     User?      @relation("TaskAssignmentUser", fields: [fromUserId], references: [id])
+  toUserId     String
+  toUser       User       @relation("TaskAssignmentAssigner", fields: [toUserId], references: [id])
+  assignedById String
+  assignedBy   User       @relation("TaskAssignmentBy", fields: [assignedById], references: [id])
+  note         String?
+  createdAt    DateTime   @default(now())
+
+  @@index([taskId])
+  @@index([toUserId])
+  @@index([createdAt])
+}
+
+model TaskVerification {
+  id        String            @id @default(cuid())
+  outcome   VerificationOutcome
+  reason    String?
+
+  taskId    String
+  task      Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  verifierId String
+  verifier  User              @relation(fields: [verifierId], references: [id])
+
+  createdAt DateTime          @default(now())
+
+  @@index([taskId])
+  @@index([verifierId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  entity    String
+  entityId  String
+  oldData   Json?
+  newData   Json?
+  metadata  Json?
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+   taskId    String?
+   task      Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+   alertId   String?
+   alert     Alert?   @relation(fields: [alertId], references: [id], onDelete: SetNull)
+
+   createdAt DateTime @default(now())
+
+   @@index([userId])
+   @@index([entity, entityId])
+   @@index([taskId])
+   @@index([alertId])
+   @@index([createdAt])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  type      String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  readAt    DateTime?
+  metadata  Json?
+  taskId    String?
+  task      Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  alertId   String?
+  alert     Alert?  @relation(fields: [alertId], references: [id], onDelete: SetNull)
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([read])
+  @@index([createdAt])
+  @@index([taskId])
+  @@index([alertId])
+}
+
+model TaskAttachment {
+  id        String   @id @default(cuid())
+  fileName  String
+  mimeType  String
+  size      Int
+  filePath  String
+
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  uploadedById String
+  uploadedBy   User   @relation("TaskAttachmentUploader", fields: [uploadedById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
+  @@index([uploadedById])
+}
+
+model Entity {
+  id          String    @id @default(cuid())
+  name        String
+  type        EntityType
+  jurisdiction String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  alerts      Alert[]
+
+  @@index([name])
+  @@index([type])
+  @@index([isActive])
+}
+
+model Alert {
+  id              String       @id @default(cuid())
+  alertNumber     Int          @unique @default(autoincrement())
+  title           String
+  reference       String?
+  description     String?
+  type            AlertType
+  status          AlertStatus  @default(OPEN)
+  priority        TaskPriority
+  entityId        String?
+  entity          Entity?      @relation(fields: [entityId], references: [id], onDelete: SetNull)
+  ownerId         String
+  owner           User         @relation("AlertOwner", fields: [ownerId], references: [id])
+  createdById     String
+  createdBy       User         @relation("AlertCreator", fields: [createdById], references: [id])
+  departmentId    String
+  department      Department?  @relation("AlertDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+  regulatoryClause String?
+  triggerDate     DateTime
+  dueDate         DateTime
+  recurrence      Recurrence   @default(ONE_TIME)
+  recurrenceIntervalDays Int?
+  recurrenceEndDate DateTime?
+  reminderDays    Int[]        @default([90, 60, 30])
+  customIntervalDays Int?
+  parentAlertId   String?
+  parentAlert     Alert?       @relation("AlertParent", fields: [parentAlertId], references: [id])
+  childAlerts     Alert[]      @relation("AlertParent")
+  completedAt     DateTime?
+  deletedAt       DateTime?
+  escalationToId  String?
+  escalationTo    User?        @relation("AlertEscalationTarget", fields: [escalationToId], references: [id], onDelete: SetNull)
+  lastReminderSentFor Int?
+  escalatedAt     DateTime?
+
+   comments        AlertComment[]
+  evidence        AlertEvidence[]
+  reminderRules   AlertReminderRule[]
+  escalationRules AlertEscalationRule[]
+  reminderLogs    AlertReminderLog[]
+  auditLogs       AuditLog[]
+  notifications   Notification[]
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([alertNumber])
+  @@index([status])
+  @@index([type])
+  @@index([priority])
+  @@index([dueDate])
+  @@index([ownerId])
+  @@index([entityId])
+  @@index([createdById])
+  @@index([deletedAt])
+  @@index([triggerDate])
+  @@index([departmentId])
+}
+
+model AlertReminderRule {
+  id           String   @id @default(cuid())
+  alertId      String?
+  alert        Alert?   @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  daysBefore   Int      @default(90)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([alertId])
+  @@index([isActive])
+}
+
+model AlertEscalationRule {
+  id              String   @id @default(cuid())
+  alertId         String?
+  alert           Alert?   @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  afterDaysOverdue Int     @default(3)
+  escalateToRole  String?
+  escalateToUserId String?
+  escalateTo      User?    @relation("EscalationTarget", fields: [escalateToUserId], references: [id])
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([alertId])
+  @@index([isActive])
+}
+
+model AlertReminderLog {
+  id        String   @id @default(cuid())
+  alertId   String
+  alert     Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  daysBefore Int
+  sentAt    DateTime @default(now())
+
+  @@index([alertId])
+  @@index([sentAt])
+}
+
+model AlertEvidence {
+  id          String   @id @default(cuid())
+  alertId     String
+  alert       Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  fileName    String
+  filePath    String
+  mimeType    String
+  size        Int
+  uploadedById String
+  uploadedBy  User     @relation("AlertEvidenceUploader", fields: [uploadedById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([alertId])
+  @@index([uploadedById])
+}
+
+model AlertComment {
+  id        String   @id @default(cuid())
+  content   String
+  editedAt  DateTime?
+  deletedAt DateTime?
+
+  alertId   String
+  alert     Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([alertId])
+  @@index([authorId])
+  @@index([deletedAt])
+}
+
+model RegulatoryTemplate {
+  id              String     @id @default(cuid())
+  title           String
+  type            AlertType
+  jurisdiction    String?
+  assetType       String?
+  regulatoryClause String?
+  defaultRecurrence Recurrence @default(ONE_TIME)
+  defaultLeadDays  Int?
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([type])
+  @@index([isActive])
+  @@index([jurisdiction])
+}
+
+model JobRun {
+  id          String   @id @default(cuid())
+  jobName     String
+  runDate     DateTime @default(now())
+  status      String   @default("SUCCESS")
+  result      Json?
+  error       String?
+  createdAt   DateTime @default(now())
+
+  @@index([jobName, runDate])
+  @@unique([jobName, runDate], name: "jobName_runDate")
+}
